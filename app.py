@@ -56,25 +56,6 @@ shortHeroNames = {
     "zenyatta": "zen"
 }
 
-def test():
-    test_image = "C:/Users/Muhznit/Documents/Overwatch/ScreenShots/Overwatch/ScreenShot_17-02-06_21-51-48-000.jpg"
-    original = Image.open(test_image)
-    #original.show()
-
-    width, height = original.size   # Get dimensions
-    left = portraitStartX
-    top = portraitStartY
-    right = left + portraitCenterSize
-    bottom = top + portraitCenterSize
-    cropped_example = original.crop((left, top, right, bottom))
-
-    #cropped_example.show()
-    iar = np.array(cropped_example)
-    plt.imshow(threshold(iar))
-    plt.show()
-    print (iar)
-    cropped_example.save("bastion.jpg")
-
 def getCropFrame(useSmallerPic):
     '''
     We will be doing a lot of cropping on screenshots. We're focused on hero portraits, (which are luckily all the same size and evenly aligned), so we need a way to programmatically cut images.
