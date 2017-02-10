@@ -301,14 +301,14 @@ if __name__ == "__main__":
             title = reader.fieldnames
             rows = [row for row in reader]
             for row in rows:
-                print (row)
                 matchups = {}
                 for key in row.keys():
                     if key != "Hero":
                         matchups[key] = float(row[key])
                 
                 matchupDict[row["Hero"]] = {"matchups": matchups}
-        print(json.dumps(matchupDict, indent = 4, sort_keys = True))
+        # Uncomment this to print the counterpickdata as JSON instead of CSV.
+        #print(json.dumps(matchupDict, indent = 4, sort_keys = True))
     except FileNotFoundError as e:
         print ("Somehow, someway, you're missing counterpick data. You may want to redownload this thing")
         sys.exit(1)
