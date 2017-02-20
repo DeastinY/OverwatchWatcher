@@ -14,11 +14,21 @@ import os
 import sys
 import __main__ as main
 
+# This is for 1280x720 resolution
 portraitStartX = 304
 portraitStartY = 192
+# Horizontal separation is 10% of screenshot width. Vertical separation? It's some weird irrational decimal. Blizzard, pls fix
 portraitHSeparation = 128
 portraitVSeparation = 203
 portraitCenterSize = 32
+
+# This is for 1980 x 1080
+portraitStartX = 456
+portraitStartY = 288
+portraitHSeparation = 192
+portraitVSeparation = 305
+portraitCenterSize = 48
+
 args = {}
 
 allHeroNames = [
@@ -65,12 +75,12 @@ def getCropFrame(useSmallerPic):
     top = portraitStartY
     right = left + portraitCenterSize
     bottom = top + portraitCenterSize
-    
+    margin = 20
     if useSmallerPic:
-        left += (portraitCenterSize // 4)
-        top += (portraitCenterSize // 4)
-        right -= (portraitCenterSize // 4)
-        bottom -= (portraitCenterSize // 4)
+        left += margin
+        top += margin
+        right -= margin
+        bottom -= margin
     
     return (left, top, right, bottom)
     
@@ -98,7 +108,7 @@ def getPortraits(path, useSmallerPic):
             
     return heroPortraits
 
-def bulkAddExamples(herodataFilename, useSmallerPic):
+def bulkAddExamples(herodataFilename, useSmallerPic, screenshotDir):
     '''
     This function makes the assumption that you have a directory named "heroes" that contains a bunch of .jpg screenshots of you showing the score screen (Typically TAB), playing a hero that shares the same name as the screenshot.
     That is, if heroes/tracer.jpg does not exist, or you didn't have Tracer selected in that pic, you're going to have issues.
@@ -131,62 +141,12 @@ def bulkAddExamples(herodataFilename, useSmallerPic):
         # Store the image data into a dict.
         heroIarls[heroName] = iar.tolist()
     
+    saveData = {"heroImgData":heroIarls, "screenshotDirectory":screenshotDir}
     # Convert the dict into a JSON structure and write it to file.
-    heroExamples.write(json.dumps(heroIarls))
+    heroExamples.write(json.dumps(saveData))
     print ("Saved heroes to " + herodataFilename)
     # Uncomment the below line if you want to actually see the contents of the file for some reason but prefer a readable format.
     #heroExamples.write(json.dumps(heroIarls, indent = 4, sort_keys = True))
-    
-    
-def addTeamExamples(heroName):
-    '''
-    This was intended to accept screenshots of mono-character games to rapidly generate examples of character portraits with minimal jpg noise.
-    The best way to get those screenshots is through custom games with AI in Hollywood skirmishes. (The green screen provides a nice solid-ish background)
-    Unfortunately, there are a lot of characters that can't be used in AI battles due to a lack of AI. So you can't have mono-Symmetra teams.
-    Until that happens, I'm going to keep this function here, waiting for that day.
-    '''
-    heroExamples = open(heroName + ".txt", "a")
-    sScreenshot = heroName + ".jpg"
-    screenshot = Image.open(sScreenshot)
-    left = portraitStartX
-    top = portraitStartY
-    right = left + portraitCenterSize
-    bottom = top + portraitCenterSize
-    heroThresholds = []
-    heroIarls = []
-    imlist = []
-    for i in range(0, 2):
-        for j in range(0, 6):
-            left = portraitStartX + (portraitHSeparation * j)
-            right = left + portraitCenterSize
-            top = portraitStartY + (portraitVSeparation * i)
-            bottom = top + portraitCenterSize
-            
-            croppedThumbnail = screenshot.crop((left, top, right, bottom))
-            imlist.append(croppedThumbnail)
-            iar = threshold(np.array(croppedThumbnail))
-            iarl = iar.tolist()
-            heroIarls.append(iarl)
-
-    # Image averaging code jacked from http://stackoverflow.com/questions/17291455/how-to-get-an-average-picture-from-100-pictures-using-pil
-    N = len(imlist)
-
-    # Create a numpy array of floats to store the average (assume RGB images)
-    arr = np.zeros((portraitCenterSize, portraitCenterSize, 3), np.float)
-
-    # Build up average pixel intensities, casting each image as an array of floats
-    for im in imlist:
-        imarr = np.array(im, dtype = np.float)
-        arr = arr+imarr/N
-
-    # Round values in array and cast as 8-bit integer
-    arr = np.array(np.round(arr),dtype = np.uint8)
-    
-    avgHero = arr.tolist()
-    print(str(avgHero))
-    plt.imshow(np.array(avgHero))
-    #plt.show()
-    heroExamples.write(str(avgHero) + "\n")
 
 def threshold(imageArray):
     '''
@@ -286,8 +246,12 @@ if __name__ == "__main__":
     try:
         heroFile = open(herodataFilename, "r").read()
     except FileNotFoundError as e:
+        print("Please choose the directory that your screenshots are kept in.")
+        directoryName = ""
+        Tk().withdraw()
+        directoryName = askdirectory()
         print ("No hero data for image recognition found. Creating.")
-        bulkAddExamples(herodataFilename, args.useSmallerPic)
+        bulkAddExamples(herodataFilename, args.useSmallerPic, directoryName)
         heroFile = open(herodataFilename, "r").read()
         
     if args.buildExamples:
@@ -313,11 +277,14 @@ if __name__ == "__main__":
         print ("Somehow, someway, you're missing counterpick data. You may want to redownload this thing")
         sys.exit(1)
     
-    print ("Press Ctrl+C to exit the program (Note: Program will lose focus due to tkinter spawning a window)")
+    print ("Press Ctrl+C to exit the program.")
     # Kind of hackish way of prompting the user for a directory to monitor, BUT IT WORKS
-    Tk().withdraw()
-    directoryName = askdirectory()
-            
+    
+    heroData = json.loads(heroFile)
+    heroImgData = heroData["heroImgData"]
+    directoryName = heroData["screenshotDirectory"]
+    print("Monitoring " + directoryName + " for screenshots")
+    
     screenshot = ""
     while True:
         # get the current time. We'll need to see how much time elapsed while we were working to calculate the time we sleep for.
@@ -329,10 +296,15 @@ if __name__ == "__main__":
             screenshot = mostrecentscreenshot
             portraitList = getPortraits(screenshot, args.useSmallerPic)
             benchmarkStart = time.time()
-            heroData = json.loads(heroFile)
-            heroList = [whoisthis(img, heroData) for img in portraitList]
-            enemies = [enemy[0] for enemy in heroList[:6] if enemy[1] < 30]
-            allies = [ally[0] for ally in heroList[6:] if ally[1] < 30]
+            
+            heroList = [whoisthis(img, heroImgData) for img in portraitList]
+            #Uncomment this to print the raw list of heroes identified, along with certainty values.
+            #print(json.dumps(heroList, indent = 4, sort_keys = True))
+            desiredCertainty = 0.9
+            certaintyThreshold = 255 * (1 - desiredCertainty)
+            enemies = [enemy[0] for enemy in heroList[:6] if enemy[1] < certaintyThreshold]
+            allies = [ally[0] for ally in heroList[6:] if ally[1] < certaintyThreshold]
+            
             
             summary = {}
             summary["enemies"] = enemies
@@ -358,6 +330,10 @@ if __name__ == "__main__":
             ret = ret[:6]
             # Uncomment this line to print the list of heroes with favorability numbers.
             #print (json.dumps(ret, indent = 4, sort_keys = True))
+            dictRet = {}
+            for i in ret:
+                dictRet[i["name"]] = i["favorSum"]
+            print (json.dumps(dictRet, indent = 4, sort_keys = True))
             output = [i["name"] for i in ret]
             #output = [(shortHeroNames[i] if i in shortHeroNames.keys() else i) for i in output]
             text = ", ".join(output)
