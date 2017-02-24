@@ -1,33 +1,39 @@
+import time
+import csv
+import json
+import argparse
+from os import scandir, stat, path
+import sys
+
 from PIL import Image
 from statistics import mean
 from math import fabs
 from tkinter import Tk
 from tkinter.filedialog import askdirectory
-import matplotlib.pyplot as plt
 import numpy as np
 import pyperclip
-import time
-import csv
-import json
-import argparse
-import os
-import sys
-import __main__ as main
 
 # This is for 1280x720 resolution
-portraitStartX = 304
-portraitStartY = 192
-# Horizontal separation is 10% of screenshot width. Vertical separation? It's some weird irrational decimal. Blizzard, pls fix
-portraitHSeparation = 128
-portraitVSeparation = 203
-portraitCenterSize = 32
+PORTRAIT_START_X = 304
+PORTRAIT_START_Y = 192
+# Horizontal separation is 10% of screenshot width. Vertical separation? It's some weird irrational decimal.
+# Blizzard, pls fix
+PORTRAIT_H_SEPARATION = 128
+PORTRAIT_V_SEPARATION = 204
+PORTRAIT_SIZE = 32
 
+USE_1080P = True
 # This is for 1980 x 1080
-portraitStartX = 456
-portraitStartY = 288
-portraitHSeparation = 192
-portraitVSeparation = 305
-portraitCenterSize = 48
+if USE_1080P:
+    PORTRAIT_START_X = 456
+    PORTRAIT_START_Y = 288
+    PORTRAIT_H_SEPARATION = 192
+    PORTRAIT_V_SEPARATION = 306
+    PORTRAIT_SIZE = 48
+
+# TODO: Add image recognition for location. Thresholding may be needed.
+locationStartY = 64
+locationFrameH = 16
 
 args = {}
 
@@ -66,198 +72,190 @@ shortHeroNames = {
     "zenyatta": "zen"
 }
 
-def getCropFrame(useSmallerPic):
-    '''
-    We will be doing a lot of cropping on screenshots. We're focused on hero portraits, (which are luckily all the same size and evenly aligned), so we need a way to programmatically cut images.
-    This function will return a tuple that can be used for PIL's cropping function, and offsets can be calculated as needed.
-    '''
-    left = portraitStartX
-    top = portraitStartY
-    right = left + portraitCenterSize
-    bottom = top + portraitCenterSize
-    margin = 20
-    if useSmallerPic:
+
+def get_crop_frame(b_use_smaller_pic):
+    """
+    We will be doing a lot of cropping on screenshots. We're focused on hero portraits, (which are luckily all the same
+    size and evenly aligned), so we need a way to pragmatically cut images.
+    This function will return a tuple that can be used for PIL's cropping function, and offsets can be calculated as
+    needed.
+    """
+    left = PORTRAIT_START_X
+    top = PORTRAIT_START_Y
+    right = left + PORTRAIT_SIZE
+    bottom = top + PORTRAIT_SIZE
+    margin = 16
+    if b_use_smaller_pic:
         left += margin
         top += margin
         right -= margin
         bottom -= margin
-    
-    return (left, top, right, bottom)
-    
-def getPortraits(path, useSmallerPic):
-    # Get the screenshot referenced by path.
-    screenshot = Image.open(path)
-    heroPortraits = []
-    # Get the frame we will use to crop the screenshot
-    baseCropFrame = getCropFrame(useSmallerPic)
-    # If enemiesOnly is true, only a list of enemy's portraits will be returned.
-    enemiesOnly = False
-    for i in range(0, (1 if enemiesOnly else 2)):
-        for j in range(0, 6):
-            # Create a new frame offset from the base frame for our crop location
-            cropFrame = (
-                baseCropFrame[0] + (portraitHSeparation * j),
-                baseCropFrame[1] + (portraitVSeparation * i),
-                baseCropFrame[2] + (portraitHSeparation * j),
-                baseCropFrame[3] + (portraitVSeparation * i)
-            )
-            croppedPortrait = screenshot.crop(cropFrame)
-            #croppedPortrait.save(str(i) + str(j) + ".png")
-            iar = np.array(croppedPortrait)
-            heroPortraits.append(iar.tolist())
-            
-    return heroPortraits
 
-def bulkAddExamples(herodataFilename, useSmallerPic, screenshotDir):
-    '''
-    This function makes the assumption that you have a directory named "heroes" that contains a bunch of .jpg screenshots of you showing the score screen (Typically TAB), playing a hero that shares the same name as the screenshot.
-    That is, if heroes/tracer.jpg does not exist, or you didn't have Tracer selected in that pic, you're going to have issues.
-    Assuming the assumptions are met, this function will store arrays of image data of each hero's portrait in a JSON structure, then store that JSON in herodata.txt.
-    '''
-    heroExamples = open(herodataFilename, "w+")
-    heroIarls = {}
-    
+    return left, top, right, bottom
+
+
+def get_portraits_from_image(image, team, b_use_smaller_pic):
+    hero_portraits = []
+    # Get the frame we will use to crop the last_analyzed_screenshot
+    base_crop_frame = get_crop_frame(b_use_smaller_pic)
+    # If enemiesOnly is true, only a list of enemy's portraits will be returned.
+    # If team is 0, we're analyzing the ENEMY team. Otherwise, we're analyzing ALLIES and need to add vertical
+    # separation.
+    # TODO: Replace this with a proper enum or something
+    vertical_separation_multiplier = team
+    for j in range(0, 6):
+        # Create a new frame offset from the base frame for our crop location
+        crop_frame = (
+            base_crop_frame[0] + (PORTRAIT_H_SEPARATION * j),
+            base_crop_frame[1] + (PORTRAIT_V_SEPARATION * vertical_separation_multiplier),
+            base_crop_frame[2] + (PORTRAIT_H_SEPARATION * j),
+            base_crop_frame[3] + (PORTRAIT_V_SEPARATION * vertical_separation_multiplier)
+        )
+        cropped_portrait = image.crop(crop_frame)
+        # croppedPortrait.save(str(i) + str(j) + ".png")
+        iar = np.array(cropped_portrait)
+        hero_portraits.append(iar.tolist())
+
+    return hero_portraits
+
+
+def bulk_add_examples(hero_data_filename, b_use_smaller_pic, screenshot_dir):
+    """
+    This function makes the assumption that you have a directory named "heroes" that contains a bunch of .jpg
+    screenshots of you showing the score screen (Typically TAB), playing a hero that shares the same name as the
+    screenshot. That is, if heroes/tracer.jpg does not exist, or you didn't have Tracer selected in that pic, you're
+    going to have issues. Assuming the assumptions are met, this function will store arrays of image data of each hero's
+    portrait in a JSON structure, then store that JSON in herodata.txt.
+    """
+    hero_examples = open(hero_data_filename, "w+")
+    hero_iarls = {}
+
     # Get the frame we will use to crop the upcoming screenshot
-    baseCropFrame = getCropFrame(useSmallerPic)
-    
+    base_crop_frame = get_crop_frame(b_use_smaller_pic)
+
     # I should probably use an array instead of a tuple, since arrays are mutable at least. Eh.
-    cropFrame = (
-        baseCropFrame[0],
-        baseCropFrame[1] + portraitVSeparation,
-        baseCropFrame[2],
-        baseCropFrame[3] + portraitVSeparation
+    crop_frame = (
+        base_crop_frame[0],
+        base_crop_frame[1] + PORTRAIT_V_SEPARATION,
+        base_crop_frame[2],
+        base_crop_frame[3] + PORTRAIT_V_SEPARATION
     )
-    
+
     # Iterate through the list of hero names at the top of the file.
     for heroName in allHeroNames:
         # Get the name of screenshot that HOPEFULLY contains their portrait in the player's slot.
-        sScreenshot = "heroes/" + heroName + ".jpg"
-        screenshot = Image.open(sScreenshot)
-        
+        example_data_path = path.join("heroes", heroName) + ".jpg"
+        example_screenshot = Image.open(example_data_path)
+
         # Get just the portrait.
-        croppedPortrait = screenshot.crop(cropFrame)
-        iar = np.array(croppedPortrait)
-        
+        cropped_portrait = example_screenshot.crop(crop_frame)
+        iar = np.array(cropped_portrait)
+
         # Store the image data into a dict.
-        heroIarls[heroName] = iar.tolist()
-    
-    saveData = {"heroImgData":heroIarls, "screenshotDirectory":screenshotDir}
+        hero_iarls[heroName] = iar.tolist()
+
+    save_data = {"heroImgData": hero_iarls, "screenshotDirectory": screenshot_dir}
     # Convert the dict into a JSON structure and write it to file.
-    heroExamples.write(json.dumps(saveData))
-    print ("Saved heroes to " + herodataFilename)
-    # Uncomment the below line if you want to actually see the contents of the file for some reason but prefer a readable format.
-    #heroExamples.write(json.dumps(heroIarls, indent = 4, sort_keys = True))
+    hero_examples.write(json.dumps(save_data))
+    print("Saved heroes to " + hero_data_filename)
+    # Uncomment the below line if you want to actually see the contents of the file for some reason but prefer a
+    # readable format.
+    # heroExamples.write(json.dumps(heroIarls, indent = 4, sort_keys = True))
 
-def threshold(imageArray):
-    '''
-    A simple, but unused image data manipulation function. This one performs a variant of Photoshop's "threshold" operation on imageArray.
-    Returns an array contining the pixel data of the processed image.
-    '''
-    balanceAr = []
-    newAr = imageArray
-    from statistics import mean
-    for eachRow in imageArray:
-        for eachPix in eachRow:
-            avgNum = mean(eachPix[:3])
-            balanceAr.append(avgNum)
 
-    balance = mean(balanceAr)
-    for eachRow in newAr:
-        for eachPix in eachRow:
-            avgPix = mean(eachPix[:3])
-            if avgPix > balance:
-                eachPix[0] = 255
-                eachPix[1] = 255
-                eachPix[2] = 255
-                if len(eachPix) > 3:
-                    eachPix[3] = 255
-            else:
-                eachPix[0] = 0
-                eachPix[1] = 0
-                eachPix[2] = 0
-                if len(eachPix) > 3:
-                    eachPix[3] = 255
-    return newAr
+def mean_array_diff(list_a, list_b):
+    """ This kind of perform's photoshop's "difference" blending mode between two pixels, list_a and list_b. Basically,
+    the new pixel's RGB is determined by [fabs(a[0] - b[0]), fabs(a[1] - b[1]), fabs(a[2] - b[2])]. Then the RGB
+    channels of that new pixel are all averaged together to produce a number between 0 and 255 (inclusive) that
+    indicates how much difference there is between the two pixels."""
+    diff = [fabs(list_a[i] - list_b[i]) for i in range(0, len(list_a))]
+    return mean(diff)
 
-def meanArrDiff(listA, listB):
-    ''' This kind of perform's photoshop's "difference" blending mode between two pixels, listA and listB. Basically, the new pixel's RGB is determined by [fabs(a[0] - b[0]), fabs(a[1] - b[1]), fabs(a[2] - b[2])].
-    Then the RGB channels of that new pixel are all averaged together to produce a number between 0 and 255 (inclusive) that indicates how much difference there is between the two pixels.'''
-    ret = [fabs(listA[i] - listB[i]) for i in range(0, len(listA))]
-    return mean(ret)
 
-def whoisthispic(pic):
-    img = Image.open(pic)
-    iar = threshold(np.array(img))
-    iarl = iar.tolist()
-    whoisthis(iarl)
-
-def whoisthis(iarl, heroData):
-    listHeroQ = iarl
-    heroPossibilities = []
+def who_is_this(iarl, json_hero_data):
+    unknown_hero_iarl = iarl
+    hero_possibilities = []
     for heroName in allHeroNames:
-        listHeroEx = heroData[heroName]
-        sumMeanDifferences = 0;
-        for i in range(0, len(listHeroEx)):
-            rowEx = listHeroEx[i]
-            rowQ = listHeroQ[i]
-            for j in range(0, len(rowEx)):
-                pixelEx = rowEx[j]
-                pixelQ = rowQ[j]
-                sumMeanDifferences += meanArrDiff(pixelEx, pixelQ)
-        sumMeanDifferences /= (i * j)
-        entry = (heroName, sumMeanDifferences)
-        heroPossibilities.append(entry)
-    
-    heroPossibilities = sorted(heroPossibilities, key = lambda a : a[1])
-    certainty = round((1 - (heroPossibilities[0][1] / 255)) * 100)
-    print ("Possible hero identified: " + str(heroPossibilities[0][0]) + " Certainty: " + str(certainty))
-    return heroPossibilities[0]
-        
-def getMRscreenshotIn(directoryName):
-    '''
-    Get the most recent screenshot taken in directory directoryName.
-    '''
-    dirInfo = [i for i in os.scandir(directoryName)]
-    entries = [(i.path, os.stat(i.path).st_ctime) for i in dirInfo]
-    entries = sorted(entries, key = lambda a : a[1], reverse = True)
-    mrscreenshot = entries[0][0]
-    return mrscreenshot
+        possible_hero_iarl = json_hero_data[heroName]
+        sum_mean_diff = 0
+        i = 0
+        j = 0
+        for i in range(0, len(possible_hero_iarl)):
+            row_possible = possible_hero_iarl[i]
+            row_unknown = unknown_hero_iarl[i]
+            for j in range(0, len(row_possible)):
+                pixel_possible = row_possible[j]
+                pixel_unknown = row_unknown[j]
+                sum_mean_diff += mean_array_diff(pixel_possible, pixel_unknown)
+        sum_mean_diff /= (i * j)
+        entry = (heroName, sum_mean_diff)
+        hero_possibilities.append(entry)
+
+    hero_possibilities = sorted(hero_possibilities, key=lambda a: a[1])
+    return hero_possibilities[0]
+
+
+def get_mr_screenshot(directory):
+    """
+    Get the path of the most recent screenshot saved in directory.
+    """
+    dir_info = [i for i in scandir(directory)]
+    entries = [(i.path, stat(i.path).st_ctime) for i in dir_info]
+    entries = sorted(entries, key=lambda a: a[1], reverse=True)
+    mr_screenshot = entries[0][0]
+    return mr_screenshot
+
 
 if __name__ == "__main__":
     argp = argparse.ArgumentParser()
     argp.add_argument("-b", "--buildExamples",
-                      dest = "buildExamples",
-                      help = "Don\'t actually run the monitor, just build a list of examples from the heroes folder.",
-                      nargs = "?",
-                      const = True,
-                      required = False)
+                      dest="buildExamples",
+                      help="Don\'t actually run the monitor, just build a list of examples from the heroes folder.",
+                      nargs="?",
+                      const=True,
+                      required=False)
     argp.add_argument("-t", "--tiny",
-                      dest = "useSmallerPic",
-                      help = "Use smaller 16x16 images. Much faster than normal, but more room for misjudgements.",
-                      nargs = "?",
-                      const = True,
-                      default = False,
-                      required = False)
-                      
+                      dest="useSmallerPic",
+                      help="Use smaller 16x16 images. Much faster than normal, but more room for misjudgements.",
+                      nargs="?",
+                      const=True,
+                      default=False,
+                      required=False)
+    # TODO: Implement "run once and quit"
+    argp.add_argument("-n", "--no-monitor",
+                      dest="noMonitor",
+                      help="Don\'t run the monitor, just report matching heroes and exit.",
+                      nargs="?",
+                      const=True,
+                      default=False,
+                      required=False)
+
     args = argp.parse_args()
+
     herodataFilename = "herodata.json"
     heroFile = ""
-    
+    heroData = None
     try:
         heroFile = open(herodataFilename, "r").read()
     except FileNotFoundError as e:
+        print("No hero data for image recognition found. Creating.")
         print("Please choose the directory that your screenshots are kept in.")
         directoryName = ""
         Tk().withdraw()
         directoryName = askdirectory()
-        print ("No hero data for image recognition found. Creating.")
-        bulkAddExamples(herodataFilename, args.useSmallerPic, directoryName)
+
+        bulk_add_examples(herodataFilename, args.useSmallerPic, directoryName)
         heroFile = open(herodataFilename, "r").read()
-        
+    heroData = json.loads(heroFile)
+
     if args.buildExamples:
-        bulkAddExamples(herodataFilename, args.useSmallerPic)
+        print("Please choose the directory that your screenshots are kept in.")
+        directoryName = ""
+        Tk().withdraw()
+        directoryName = askdirectory()
+        bulk_add_examples(herodataFilename, args.useSmallerPic, directoryName)
         sys.exit(0)
-    
+
     matchupDict = {}
     try:
         with open("counterpickdata.csv") as csvfile:
@@ -269,82 +267,93 @@ if __name__ == "__main__":
                 for key in row.keys():
                     if key != "Hero":
                         matchups[key] = float(row[key])
-                
+
                 matchupDict[row["Hero"]] = {"matchups": matchups}
-        # Uncomment this to print the counterpickdata as JSON instead of CSV.
-        #print(json.dumps(matchupDict, indent = 4, sort_keys = True))
+                # Uncomment this to print the counterpickdata as JSON instead of CSV.
+                # print(json.dumps(matchupDict, indent = 4, sort_keys = True))
     except FileNotFoundError as e:
-        print ("Somehow, someway, you're missing counterpick data. You may want to redownload this thing")
+        print("Somehow, someway, you're missing counterpick data. You may want to redownload this thing")
         sys.exit(1)
-    
-    print ("Press Ctrl+C to exit the program.")
+
+    print("Press Ctrl+C to exit the program.")
     # Kind of hackish way of prompting the user for a directory to monitor, BUT IT WORKS
-    
-    heroData = json.loads(heroFile)
+
     heroImgData = heroData["heroImgData"]
     directoryName = heroData["screenshotDirectory"]
     print("Monitoring " + directoryName + " for screenshots")
-    
-    screenshot = ""
+
+    last_analyzed_screenshot = ""
     while True:
-        # get the current time. We'll need to see how much time elapsed while we were working to calculate the time we sleep for.
+        # get the current time. We'll need to see how much time elapsed while we were working to calculate the time we
+        # sleep for.
         tStart = time.time()
-        mostrecentscreenshot = getMRscreenshotIn(directoryName)
+        mostrecentscreenshot = get_mr_screenshot(directoryName)
         analysisInProgress = False
-        if screenshot != mostrecentscreenshot:
-            print ("New screenshot detected at time " + str(tStart))
-            screenshot = mostrecentscreenshot
-            portraitList = getPortraits(screenshot, args.useSmallerPic)
-            benchmarkStart = time.time()
-            
-            heroList = [whoisthis(img, heroImgData) for img in portraitList]
-            #Uncomment this to print the raw list of heroes identified, along with certainty values.
-            #print(json.dumps(heroList, indent = 4, sort_keys = True))
+        if last_analyzed_screenshot != mostrecentscreenshot:
+            print("New screenshot detected at time " + str(tStart))
+            last_analyzed_screenshot = mostrecentscreenshot
+            # Get the last_analyzed_screenshot referenced by path.
+            openedScreenshot = None
+            enemies = []
+            allies = []
+            try:
+                openedScreenshot = Image.open(last_analyzed_screenshot)
+            except PermissionError:
+                print("Sometimes a race condition happens between Overwatch writing a screenshot and the program " +
+                      "reading the screenshot and it results in a PermissionError.")
+            enemies = get_portraits_from_image(openedScreenshot, 0, args.useSmallerPic)
+            allies = get_portraits_from_image(openedScreenshot, 1, args.useSmallerPic)
+            enemies = [who_is_this(img, heroImgData) for img in enemies]
+            allies = [who_is_this(img, heroImgData) for img in allies]
+            enemies = [[i[0], round((1 - (i[1] / 255)) * 100)] for i in enemies]
+            allies = [[i[0], round((1 - (i[1] / 255)) * 100)] for i in allies]
+
+            for i in enemies:
+                print("Possible enemy identified: " + str(i[0]) + " Certainty: " + str(i[1]))
+            for i in allies:
+                print("Possible ally identified: " + str(i[0]) + " Certainty: " + str(i[1]))
+
             desiredCertainty = 0.9
-            certaintyThreshold = 255 * (1 - desiredCertainty)
-            enemies = [enemy[0] for enemy in heroList[:6] if enemy[1] < certaintyThreshold]
-            allies = [ally[0] for ally in heroList[6:] if ally[1] < certaintyThreshold]
-            
-            
-            summary = {}
-            summary["enemies"] = enemies
-            summary["allies"] = allies
-            
-            compToBeat = allies
-            print(json.dumps(summary, indent = 4, sort_keys = True))
+            enemies = [i[0] for i in enemies if i[1] > desiredCertainty]
+            enemies = ["symmetra"] * 6
+            allies = [i[0] for i in allies if i[1] > desiredCertainty]
+            benchmarkStart = time.time()
+            summary = {"enemies": enemies, "allies": allies}
+
+            print(json.dumps(summary, indent=4, sort_keys=True))
             # Iterate through matchup data, filter so all "vs" entries contain only the enemies currently being fought.
+            compToBeat = enemies
             filteredMatchupLists = {}
             for name in matchupDict.keys():
                 for key, value in matchupDict.items():
-                    # Iterate through filtered matchup data and create a dict of name:sums of the weights for members of the enemy team.
-                    matchups = [{"vs":key, "favor":val} for key, val in matchupDict[name]["matchups"].items() if str(key) in compToBeat]
+                    # Iterate through filtered matchup data and create a dict of name:sums of the weights for members
+                    # of the enemy team.
+                    matchups = [{"vs": key, "favor": val} for key, val in matchupDict[name]["matchups"].items() if
+                                str(key) in compToBeat]
                     filteredMatchupDict = {}
-                    for i in matchups:
-                        filteredMatchupDict[i["vs"]] = i["favor"]
                     favorSum = sum([i["favor"] for i in matchups])
                     filteredMatchupDict["favorSum"] = favorSum
-                filteredMatchupLists[name] = filteredMatchupDict
+                    filteredMatchupLists[name] = {"favorSum": favorSum}
             # Sort the filtered matchups
-            ret = [{"name":key, "favorSum":val["favorSum"]} for key, val in filteredMatchupLists.items()]
-            ret = sorted(ret, key = lambda a : a["favorSum"], reverse = True)
+            ret = [{"name": key, "favorSum": val["favorSum"]} for key, val in filteredMatchupLists.items()]
+            ret = sorted(ret, key=lambda a: a["favorSum"], reverse=True)
             ret = ret[:6]
-            # Uncomment this line to print the list of heroes with favorability numbers.
-            #print (json.dumps(ret, indent = 4, sort_keys = True))
+
             dictRet = {}
             for i in ret:
                 dictRet[i["name"]] = i["favorSum"]
-            print (json.dumps(dictRet, indent = 4, sort_keys = True))
+            print(json.dumps(dictRet, indent=4, sort_keys=True))
             output = [i["name"] for i in ret]
-            #output = [(shortHeroNames[i] if i in shortHeroNames.keys() else i) for i in output]
+            # output = [(shortHeroNames[i] if i in shortHeroNames.keys() else i) for i in output]
             text = ", ".join(output)
-            
+
             # Indicate that we're finished by sounding an alarm, specifically, printing the ASCII Bell character, '\a'
-            print ("\aFinished in " + str(time.time() - benchmarkStart) + " seconds")
-            print (json.dumps(output, indent = 4, sort_keys = True))
-            
-            # Copy results to clipboard so you don't have to alt + tab to see them, just paste anywhere that has a text box.
+            print("\aFinished in " + str(time.time() - benchmarkStart) + " seconds")
+            print(json.dumps(output, indent=4, sort_keys=True))
+
+            # Copy results to clipboard so you don't have to alt + tab to see them, just paste anywhere that has a text
+            # box.
             pyperclip.copy(str(text))
-            # Uncomment this if you're a lazy butt who wants to ask friends about the accuracy of this script.
-            # print ("How would this comp: \n" + ", ".join(output) + "\nfair against this one: \n" + ", ".join(compToBeat))
+
         sleepDuration = time.time() - tStart
         time.sleep(1 - (sleepDuration if sleepDuration < 1 else 0))
