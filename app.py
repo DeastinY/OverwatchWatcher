@@ -205,6 +205,9 @@ def get_mr_screenshot(directory):
     mr_screenshot = entries[0][0]
     return mr_screenshot
 
+def shortenedName(name):
+    return shortHeroNames[name] if name in shortHeroNames.keys() else name
+
 
 if __name__ == "__main__":
     argp = argparse.ArgumentParser()
@@ -265,10 +268,10 @@ if __name__ == "__main__":
             for row in rows:
                 matchups = {}
                 for key in row.keys():
-                    if key != "Hero":
+                    if key != "name":
                         matchups[key] = float(row[key])
 
-                matchupDict[row["Hero"]] = {"matchups": matchups}
+                matchupDict[row["name"]] = {"matchups": matchups}
                 # Uncomment this to print the counterpickdata as JSON instead of CSV.
                 # print(json.dumps(matchupDict, indent = 4, sort_keys = True))
     except FileNotFoundError as e:
@@ -290,17 +293,19 @@ if __name__ == "__main__":
         mostrecentscreenshot = get_mr_screenshot(directoryName)
         analysisInProgress = False
         if last_analyzed_screenshot != mostrecentscreenshot:
-            print("New screenshot detected at time " + str(tStart))
             last_analyzed_screenshot = mostrecentscreenshot
-            # Get the last_analyzed_screenshot referenced by path.
+            print("New screenshot detected at time " + str(tStart))
             openedScreenshot = None
             enemies = []
             allies = []
             try:
                 openedScreenshot = Image.open(last_analyzed_screenshot)
-            except PermissionError:
+            except:
                 print("Sometimes a race condition happens between Overwatch writing a screenshot and the program " +
                       "reading the screenshot and it results in a PermissionError.")
+                sleepDuration = time.time() - tStart
+                continue
+            # Set the last analyzed screenshot here if it was opened successfully
             enemies = get_portraits_from_image(openedScreenshot, 0, args.useSmallerPic)
             allies = get_portraits_from_image(openedScreenshot, 1, args.useSmallerPic)
             enemies = [who_is_this(img, heroImgData) for img in enemies]
@@ -313,13 +318,12 @@ if __name__ == "__main__":
             for i in allies:
                 print("Possible ally identified: " + str(i[0]) + " Certainty: " + str(i[1]))
 
+            # TODO: Combine desired certainty with margin on portraits somehow. They kind of influence each other.
             desiredCertainty = 0.9
             enemies = [i[0] for i in enemies if i[1] > desiredCertainty]
-            enemies = ["symmetra"] * 6
             allies = [i[0] for i in allies if i[1] > desiredCertainty]
-            benchmarkStart = time.time()
-            summary = {"enemies": enemies, "allies": allies}
 
+            summary = {"enemies": enemies, "allies": allies}
             print(json.dumps(summary, indent=4, sort_keys=True))
             # Iterate through matchup data, filter so all "vs" entries contain only the enemies currently being fought.
             compToBeat = enemies
@@ -341,14 +345,13 @@ if __name__ == "__main__":
 
             dictRet = {}
             for i in ret:
-                dictRet[i["name"]] = i["favorSum"]
+                dictRet[i["name"]] = "{:1.2f}".format(i["favorSum"])
             print(json.dumps(dictRet, indent=4, sort_keys=True))
-            output = [i["name"] for i in ret]
-            # output = [(shortHeroNames[i] if i in shortHeroNames.keys() else i) for i in output]
+            output = [shortenedName(i["name"]) for i in ret]
             text = ", ".join(output)
 
             # Indicate that we're finished by sounding an alarm, specifically, printing the ASCII Bell character, '\a'
-            print("\aFinished in " + str(time.time() - benchmarkStart) + " seconds")
+            print("\aFinished in " + str(time.time() - tStart) + " seconds")
             print(json.dumps(output, indent=4, sort_keys=True))
 
             # Copy results to clipboard so you don't have to alt + tab to see them, just paste anywhere that has a text
