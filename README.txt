@@ -18,10 +18,13 @@ Installation instructions:
 
 1. Install Python 3.5 and pip
 2. pip install -r requirements.txt should install all the necessary requirements. You may want to use a virtual environment for them.
-3.Linux
-    python ./app.py
-3.Windows
-    python.exe ./app.py
-4. The first time it will look in "heroes/" for screenshots to build image data for individual heroes, needed for image recognition. You will be prompted for the screenshots folder the app will use.
+
+Running:
+    Linux:
+        ./app.py
+    Windows
+        python.exe ./app.py
+4. The first time it starts, it will look in "heroes/" for screenshots to build image data for individual heroes, needed for image recognition. 
+You will be prompted for the screenshots folder the app will use.
     
 **At the moment, some modification of the code is needed to alter resolution of screenshots*
