@@ -405,8 +405,7 @@ if __name__ == "__main__":
                             ("enemy" if i == 0 else "ally"),  # What team they're on
                             j[0],  # What character
                             j[1],  # How certain we are its that character (between 0 and 1, inclusive)
-                            ("Possibly dead." if j[2] > .5 else ""))  # Notes.
-                    )
+                            ("Possibly dead." if j[2] > .5 else "")))  # Notes.
                 # Finally, convert the tuples to just the names.
                 team = [j[0] for j in team if j[1] >= desiredCertainty]
                 allPlayers.append(team)
