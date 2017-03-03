@@ -9,6 +9,7 @@ of network communications.
 The way this script works:
     1. The script monitors the directory Overwatch saves its screenshots to, and opens the latest screenshot taken.
     2. An image recognition algorithm is used to guess what heroes are on the enemy team.
+        * Note: Image recognition only gives reliable results outside of the hero selection screen.
     3. Using player-sourced data, it suggests heroes that have the biggest advantage against the enemy team.
     4. Findings are recorded to the clipboard so the user can quickly paste them in in-game chat.
 

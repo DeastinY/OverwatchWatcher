@@ -1,16 +1,16 @@
-import time
+import argparse
 import csv
 import json
-import argparse
-from os import scandir, stat, path
-
-from PIL import Image
-from statistics import mean
+import time
 from math import fabs
+from os import scandir, stat, path, getcwd
+from statistics import mean
 from tkinter import Tk
 from tkinter.filedialog import askdirectory
+
 import numpy as np
 import pyperclip
+from PIL import Image
 
 MAX_TEAM_SIZE = 6
 
@@ -240,6 +240,8 @@ def who_is_this(iarl, json_hero_data):
 
     # Sort possible heroes by amount of difference between the pictures, lowest difference being first.
     hero_possibilities = sorted(hero_possibilities, key=lambda a: a[1])
+    # Uncomment this line to print the 6 most likely heroes for the given iarl.
+    # print([i[0] for i in hero_possibilities][:6])
     best_guess = hero_possibilities[0]
 
     # Normalize the best guess for ease of readability and further calculation
@@ -334,6 +336,7 @@ if __name__ == "__main__":
     herodataFilename = "herodata.json"
     heroFile = ""
     heroData = None
+    print("Working in " + getcwd())
     try:
         heroFile = open(herodataFilename, "r").read()
     except FileNotFoundError as e:
@@ -375,21 +378,22 @@ if __name__ == "__main__":
         if last_analyzed_screenshot != mostrecentscreenshot:
             # Set the last analyzed screenshot here
             last_analyzed_screenshot = mostrecentscreenshot
-            print("New screenshot detected at time {:1.2f}".format(tStart))
+            print("New screenshot \"{}\" detected at time {:1.2f}".format(mostrecentscreenshot, tStart))
             openedScreenshot = None
             enemies = []
             allies = []
             try:
                 openedScreenshot = Image.open(last_analyzed_screenshot)
-            except Exception:
+            except:
                 print("Sometimes a race condition happens between Overwatch writing a screenshot and the program " +
                       "reading the screenshot and it results in an error of some sort. It's a known issue.")
                 sleepDuration = time.time() - tStart
                 continue
 
             allPlayers = []
+            avg_certainties = []
             # TODO: Combine desired certainty with margin on portraits somehow. They kind of influence each other.
-            desiredCertainty = 0.9
+            desiredCertainty = 0.95
             for i in range(2):
                 # Populate a list with all portraits on an enemy team
                 team = get_portraits_from_image(openedScreenshot, i, args.useSmallerPic)
@@ -406,8 +410,11 @@ if __name__ == "__main__":
                             j[0],  # What character
                             j[1],  # How certain we are its that character (between 0 and 1, inclusive)
                             ("Possibly dead." if j[2] > .5 else "")))  # Notes.
+                # Get the average certainty for the whole team.
+                avg_certainty = mean([j[1] for j in team])
+                avg_certainties.append(avg_certainty)
                 # Finally, convert the tuples to just the names.
-                team = [j[0] for j in team if j[1] >= desiredCertainty]
+                team = [j[0] for j in team if j[2] < .5]
                 allPlayers.append(team)
 
             print(json.dumps(allPlayers, indent=4, sort_keys=True))
