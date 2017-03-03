@@ -459,5 +459,7 @@ if __name__ == "__main__":
 
         sleepDuration = time.time() - tStart
         if args.noMonitor:
+            # Sleep for a second or two so we can actually hear the alarm before terminating.
+            time.sleep(2)
             exit(0)
         time.sleep(1 - (sleepDuration if sleepDuration < 1 else 0))
