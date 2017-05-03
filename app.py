@@ -1,4 +1,5 @@
 import argparse
+import sys
 import csv
 import json
 import time
@@ -13,6 +14,9 @@ import pyperclip
 from PIL import Image
 
 MAX_TEAM_SIZE = 6
+
+# File endings to consider
+IMG_ENDINGS = ["jpg", "jpeg", "png", "tif", "tiff", "gif"]
 
 # This is for 1280x720 resolution
 PORTRAIT_START_X = 304
@@ -256,7 +260,7 @@ def get_mr_screenshot(directory):
     :return: The path to the latest screenshot in directory.
     """
     dir_info = [i for i in scandir(directory)]
-    entries = [(i.path, stat(i.path).st_ctime) for i in dir_info]
+    entries = [(i.path, stat(i.path).st_ctime) for i in dir_info if any([e in i.path for e in IMG_ENDINGS])]
     entries = sorted(entries, key=lambda a: a[1], reverse=True)
     mr_screenshot = entries[0][0]
     return mr_screenshot
@@ -385,6 +389,7 @@ if __name__ == "__main__":
             try:
                 openedScreenshot = Image.open(last_analyzed_screenshot)
             except:
+                print(sys.exc_info()[0])
                 print("Sometimes a race condition happens between Overwatch writing a screenshot and the program " +
                       "reading the screenshot and it results in an error of some sort. It's a known issue.")
                 sleepDuration = time.time() - tStart
