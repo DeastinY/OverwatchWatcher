@@ -303,6 +303,50 @@ def get_matchup_data_from_csv(csv_filename, b_print=False):
         exit(1)
     return matchup_dict
 
+def analyze_screeshot(screenshot, useSmallerPic):
+    """
+    Analyzes a screeshot to find the probabilites for characters on each team.
+    :return: Returns information about all Players and their probabilities.
+    """
+    openedScreenshot = None
+    enemies = []
+    allies = []
+    try:
+        openedScreenshot = Image.open(screenshot)
+    except:
+        print(sys.exc_info()[0])
+        print("Sometimes a race condition happens between Overwatch writing a screenshot and the program " +
+                "reading the screenshot and it results in an error of some sort. It's a known issue.")
+        return
+
+    allPlayers = []
+    avg_certainties = []
+    # TODO: Combine desired certainty with margin on portraits somehow. They kind of influence each other.
+    desiredCertainty = 0.95
+    for i in range(2):
+        # Populate a list with all portraits on an enemy team
+        team = get_portraits_from_image(openedScreenshot, i, useSmallerPic)
+        # Convert those portraits to tuples containing the hero name, some level of certainty, and
+        # if they're possibly dead
+        team = [who_is_this(img, heroImgData) for img in team]
+        for j in team:
+            possiblyDead = j[2] > .5
+            uncertainID = j[1] < desiredCertainty
+            print("{} {} {} with certainty {:1.2f}. {}"
+                    .format(
+                    ("Ignoring" if possiblyDead or uncertainID else "Identified"),  # What we're doing
+                    ("enemy" if i == 0 else "ally"),  # What team they're on
+                    j[0],  # What character
+                    j[1],  # How certain we are its that character (between 0 and 1, inclusive)
+                    ("Possibly dead." if j[2] > .5 else "")))  # Notes.
+        # Get the average certainty for the whole team.
+        avg_certainty = mean([j[1] for j in team])
+        avg_certainties.append(avg_certainty)
+        # Finally, convert the tuples to just the names.
+        team = [j[0] for j in team if j[2] < .5]
+        allPlayers.append(team)
+    return allPlayers
+
 
 if __name__ == "__main__":
     argp = argparse.ArgumentParser()
@@ -383,44 +427,8 @@ if __name__ == "__main__":
             # Set the last analyzed screenshot here
             last_analyzed_screenshot = mostrecentscreenshot
             print("New screenshot \"{}\" detected at time {:1.2f}".format(mostrecentscreenshot, tStart))
-            openedScreenshot = None
-            enemies = []
-            allies = []
-            try:
-                openedScreenshot = Image.open(last_analyzed_screenshot)
-            except:
-                print(sys.exc_info()[0])
-                print("Sometimes a race condition happens between Overwatch writing a screenshot and the program " +
-                      "reading the screenshot and it results in an error of some sort. It's a known issue.")
-                sleepDuration = time.time() - tStart
-                continue
-
-            allPlayers = []
-            avg_certainties = []
-            # TODO: Combine desired certainty with margin on portraits somehow. They kind of influence each other.
-            desiredCertainty = 0.95
-            for i in range(2):
-                # Populate a list with all portraits on an enemy team
-                team = get_portraits_from_image(openedScreenshot, i, args.useSmallerPic)
-                # Convert those portraits to tuples containing the hero name, some level of certainty, and
-                # if they're possibly dead
-                team = [who_is_this(img, heroImgData) for img in team]
-                for j in team:
-                    possiblyDead = j[2] > .5
-                    uncertainID = j[1] < desiredCertainty
-                    print("{} {} {} with certainty {:1.2f}. {}"
-                          .format(
-                            ("Ignoring" if possiblyDead or uncertainID else "Identified"),  # What we're doing
-                            ("enemy" if i == 0 else "ally"),  # What team they're on
-                            j[0],  # What character
-                            j[1],  # How certain we are its that character (between 0 and 1, inclusive)
-                            ("Possibly dead." if j[2] > .5 else "")))  # Notes.
-                # Get the average certainty for the whole team.
-                avg_certainty = mean([j[1] for j in team])
-                avg_certainties.append(avg_certainty)
-                # Finally, convert the tuples to just the names.
-                team = [j[0] for j in team if j[2] < .5]
-                allPlayers.append(team)
+            allPlayers = analyze_screeshot(last_analyzed_screenshot, args.useSmallerPic)
+            
 
             print(json.dumps(allPlayers, indent=4, sort_keys=True))
             # TODO: Turn everything below into a function that accepts enemies and allies as parameters.
