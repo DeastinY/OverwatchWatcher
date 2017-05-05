@@ -6,6 +6,8 @@ import time
 from math import fabs
 from os import scandir, stat, path, getcwd
 from statistics import mean
+import requests
+from bs4 import BeautifulSoup
 from tkinter import Tk
 from tkinter.filedialog import askdirectory
 
@@ -65,7 +67,7 @@ allHeroNames = [
     "mccree",
     "mei",
     "mercy",
-    "orisa",
+    #"orisa",
     "pharah",
     "reaper",
     "reinhardt",
@@ -89,6 +91,17 @@ shortHeroNames = {
     "widowmaker": "widow",
     "zenyatta": "zen"
 }
+
+
+def get_hero_portraits():
+    """Uses spriters-resource to download the current hero portraits."""
+    data = requests.get("https://www.spriters-resource.com/pc_computer/overwatch").text
+    soup = BeautifulSoup(data, "lxml")
+    for img in soup.find_all("img"):
+        if any([h in img.get('alt').lower()for h in allHeroNames]):
+            r = requests.get("https://www.spriters-resource.com"+img.get('src'))
+            with open(img.get('src').split('/')[-1], 'wb') as fout:
+                fout.write(r.content)
 
 
 def get_crop_frame():
@@ -335,12 +348,11 @@ if __name__ == "__main__":
                       nargs="?",
                       const=True,
                       required=False)
-    argp.add_argument("-t", "--tiny",
-                      dest="useSmallerPic",
-                      help="Use smaller 16x16 images. Much faster than normal, but more room for misjudgements.",
+    argp.add_argument("-g", "--getOnlinePortraits",
+                      dest="getHeroPortraits",
+                      help="Don\'t actually run the monitor, just load current portraits from the web.",
                       nargs="?",
                       const=True,
-                      default=False,
                       required=False)
     argp.add_argument("-n", "--no-monitor",
                       dest="noMonitor",
@@ -386,6 +398,10 @@ if __name__ == "__main__":
         save_configuration(herodataFilename, args.useSmallerPic, directoryName)
         exit(0)
 
+    if args.getHeroPortraits:
+        print("Crawling Portraits")
+        get_hero_portraits()
+        exit(0)
     csv_filename = "counterpickdata.csv"
     matchupDict = get_matchup_data_from_csv(csv_filename)
 
