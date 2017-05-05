@@ -18,27 +18,39 @@ MAX_TEAM_SIZE = 6
 # File endings to consider
 IMG_ENDINGS = ["jpg", "jpeg", "png", "tif", "tiff", "gif"]
 
-# This is for 1280x720 resolution
-PORTRAIT_START_X = 304
-PORTRAIT_START_Y = 192
 # Horizontal separation is 10% of screenshot width. Vertical separation? It's some weird irrational decimal.
 # Blizzard, pls fix
-PORTRAIT_H_SEPARATION = 128
-PORTRAIT_V_SEPARATION = 204
-PORTRAIT_SIZE = 32
 
-USE_1080P = True
+USE_720P = False
+# This is for 1280 x 720
+if USE_720P:
+    PORTRAIT_START_X = 304
+    PORTRAIT_START_Y = 192
+    
+    PORTRAIT_H_SEPARATION = 128
+    PORTRAIT_V_SEPARATION = 204
+    PORTRAIT_SIZE_X = 32
+    PORTRAIT_SIZE_Y = 32
+
+USE_1080P = False
 # This is for 1980 x 1080
 if USE_1080P:
-    PORTRAIT_START_X = 456
-    PORTRAIT_START_Y = 288
+    PORTRAIT_START_X = 405
+    PORTRAIT_START_Y = 540
     PORTRAIT_H_SEPARATION = 192
-    PORTRAIT_V_SEPARATION = 306
-    PORTRAIT_SIZE = 48
+    PORTRAIT_V_SEPARATION = -320
+    PORTRAIT_SIZE_X = 150
+    PORTRAIT_SIZE_Y = 160
 
-# TODO: Add image recognition for location (Numbani, Ilios, Volskaya Industries, etc. Thresholding may be needed.
-locationStartY = 64
-locationFrameH = 16
+USE_1440P = True
+# This is for 2560 x 1440
+if USE_1440P:
+    PORTRAIT_START_X = 530
+    PORTRAIT_START_Y = 715
+    PORTRAIT_H_SEPARATION = 256
+    PORTRAIT_V_SEPARATION = -410
+    PORTRAIT_SIZE_X = 220
+    PORTRAIT_SIZE_Y = 220
 
 args = {}
 
@@ -53,6 +65,7 @@ allHeroNames = [
     "mccree",
     "mei",
     "mercy",
+    "orisa",
     "pharah",
     "reaper",
     "reinhardt",
@@ -78,93 +91,71 @@ shortHeroNames = {
 }
 
 
-def get_crop_frame(b_use_smaller_pic):
+def get_crop_frame():
     """
     We will be doing a lot of cropping on screenshots. We're focused on hero portraits, (which are luckily all the same
     size and evenly aligned), so we need a way to pragmatically cut images.
     This function will return a tuple that can be used for PIL's cropping function, and offsets can be calculated as
     needed.
-    :param b_use_smaller_pic: Set to true to use smaller pictures for faster performance at the cost of accuracy.
-    :return:
     """
     left = PORTRAIT_START_X
     top = PORTRAIT_START_Y
-    right = left + PORTRAIT_SIZE
-    bottom = top + PORTRAIT_SIZE
-    margin = 16
-    if b_use_smaller_pic:
-        left += margin
-        top += margin
-        right -= margin
-        bottom -= margin
+    right = left + PORTRAIT_SIZE_X
+    bottom = top + PORTRAIT_SIZE_Y
 
     return left, top, right, bottom
 
 
-def get_portraits_from_image(image, team, b_use_smaller_pic):
+def get_portraits_from_image(image):
     """
     Converts a screenshot into a list of pixel data.
     :param image: The screenshot that was taken
-    :param team: 0 if you wish to analyze the ENEMY team, 1 for allies.
-    :param b_use_smaller_pic: Set to true to use smaller pictures for faster performance at the cost of accuracy.
+    :param use_smaller_pic: Set to true to use smaller pictures for faster performance at the cost of accuracy.
     :return: A list of 6 lists of lists of lists, one for each hero observed on the team.
     """
-    hero_portraits = []
+    portraits = {}
     # Get the frame we will use to crop the last_analyzed_screenshot
-    base_crop_frame = get_crop_frame(b_use_smaller_pic)
-    # If enemiesOnly is true, only a list of enemy's portraits will be returned.
-    # If team is 0, we're analyzing the ENEMY team. Otherwise, we're analyzing ALLIES and need to add vertical
-    # separation.
-    # TODO: Replace this with a proper enum or something
-    vertical_separation_multiplier = team
-    for j in range(0, 6):
-        # Create a new frame offset from the base frame for our crop location
-        crop_frame = (
-            base_crop_frame[0] + (PORTRAIT_H_SEPARATION * j),
-            base_crop_frame[1] + (PORTRAIT_V_SEPARATION * vertical_separation_multiplier),
-            base_crop_frame[2] + (PORTRAIT_H_SEPARATION * j),
-            base_crop_frame[3] + (PORTRAIT_V_SEPARATION * vertical_separation_multiplier)
-        )
-        cropped_portrait = image.crop(crop_frame)
-        # croppedPortrait.save(str(i) + str(j) + ".png")
-        iar = np.array(cropped_portrait)
-        hero_portraits.append(iar.tolist())
+    base_crop_frame = get_crop_frame()
+    for vertical_separation_multiplier in [0, 1]:
+        hero_portraits = []
+        for j in range(0, 6):
+            # Create a new frame offset from the base frame for our crop location
+            crop_frame = (
+                base_crop_frame[0] + (PORTRAIT_H_SEPARATION * j),
+                base_crop_frame[1] + (PORTRAIT_V_SEPARATION * vertical_separation_multiplier),
+                base_crop_frame[2] + (PORTRAIT_H_SEPARATION * j),
+                base_crop_frame[3] + (PORTRAIT_V_SEPARATION * vertical_separation_multiplier)
+            )
+            cropped_portrait = image.crop(crop_frame)
+            # croppedPortrait.save(str(i) + str(j) + ".png")
+            iar = np.array(cropped_portrait)
+            # Image.fromarray(iar).show()
+            hero_portraits.append(iar.tolist())
+        team = "enemy" if vertical_separation_multiplier else "ally"
+        portraits[team] = hero_portraits
 
-    return hero_portraits
+    return portraits
 
 
-def generate_example_hero_image_data(b_use_smaller_pic):
+def generate_example_hero_image_data():
     """
-    Open the images in heroes/ and stores the pixel data as lists of lists of lists.
-    :param b_use_smaller_pic: Set to true to use smaller pictures for faster performance at the cost of accuracy.
+    Open the images in heroes/ and stores the pixel data. Create screenshots with the heroe in all slots for this.
     :return: Returns a dictionary containing the data.
     """
     hero_iarls = {}
-
-    # Get the frame we will use to crop the upcoming screenshot
-    base_crop_frame = get_crop_frame(b_use_smaller_pic)
-
-    # I should probably use an array instead of a tuple, since arrays are mutable at least. Eh.
-    crop_frame = (
-        base_crop_frame[0],
-        base_crop_frame[1] + PORTRAIT_V_SEPARATION,
-        base_crop_frame[2],
-        base_crop_frame[3] + PORTRAIT_V_SEPARATION
-    )
-
     # Iterate through the list of hero names at the top of the file.
     for heroName in allHeroNames:
         # Get the name of screenshot that HOPEFULLY contains their portrait in the player's slot.
         example_data_path = path.join("heroes", heroName) + ".jpg"
         example_screenshot = Image.open(example_data_path)
 
-        # Get just the portrait.
-        cropped_portrait = example_screenshot.crop(crop_frame)
-        iar = np.array(cropped_portrait)
-
-        # Store the image data into a dict.
-        hero_iarls[heroName] = iar.tolist()
-
+        # Get the portraits
+        cropped_portraits = get_portraits_from_image(example_screenshot)
+        iar = []
+        for key, value in cropped_portraits.items():
+            for v in value:
+                iar.append(np.array(v).tolist())
+        hero_iarls[heroName] = iar
     return hero_iarls
 
 
@@ -172,7 +163,6 @@ def save_configuration(hero_data_filename, b_use_smaller_pic, screenshot_dir):
     """
     Saves configuration data for the next time the script runs.
     :param hero_data_filename: The filename to which the data will be saved.
-    :param b_use_smaller_pic: Set to true to use smaller pictures for faster performance at the cost of accuracy.
     :param screenshot_dir: The directory in which Overwatch keeps its Screenshots
     :return: A dictionary containing at least the heroImageData and screenshotDirectory at the moment.
     """
@@ -184,7 +174,7 @@ def save_configuration(hero_data_filename, b_use_smaller_pic, screenshot_dir):
     portrait in a JSON structure, then store that JSON in herodata.txt.
     """
     hero_examples = open(hero_data_filename, "w+")
-    hero_iarls = generate_example_hero_image_data(b_use_smaller_pic)
+    hero_iarls = generate_example_hero_image_data()
 
     save_data = {"heroImgData": hero_iarls,
                  "screenshotDirectory": screenshot_dir
@@ -192,9 +182,6 @@ def save_configuration(hero_data_filename, b_use_smaller_pic, screenshot_dir):
     # Convert the dict into a JSON structure and write it to file.
     hero_examples.write(json.dumps(save_data))
     print("Saved heroes to " + hero_data_filename)
-    # Uncomment the below line if you want to actually see the contents of the file for some reason but prefer a
-    # readable format.
-    # heroExamples.write(json.dumps(heroIarls, indent = 4, sort_keys = True))
 
 
 def mean_array_diff(list_a, list_b):
@@ -303,49 +290,41 @@ def get_matchup_data_from_csv(csv_filename, b_print=False):
         exit(1)
     return matchup_dict
 
+
 def analyze_screeshot(screenshot, useSmallerPic):
     """
     Analyzes a screeshot to find the probabilites for characters on each team.
     :return: Returns information about all Players and their probabilities.
     """
-    openedScreenshot = None
-    enemies = []
-    allies = []
     try:
-        openedScreenshot = Image.open(screenshot)
+        opened_screenshot = Image.open(screenshot)
     except:
         print(sys.exc_info()[0])
-        print("Sometimes a race condition happens between Overwatch writing a screenshot and the program " +
-                "reading the screenshot and it results in an error of some sort. It's a known issue.")
+        print("Sometimes a race condition happens between Overwatch writing a screenshot and the program reading the screenshot and it results in an error of some sort. It's a known issue.")
         return
 
-    allPlayers = []
+    players = []
     avg_certainties = []
     # TODO: Combine desired certainty with margin on portraits somehow. They kind of influence each other.
-    desiredCertainty = 0.95
-    for i in range(2):
-        # Populate a list with all portraits on an enemy team
-        team = get_portraits_from_image(openedScreenshot, i, useSmallerPic)
-        # Convert those portraits to tuples containing the hero name, some level of certainty, and
-        # if they're possibly dead
-        team = [who_is_this(img, heroImgData) for img in team]
-        for j in team:
-            possiblyDead = j[2] > .5
-            uncertainID = j[1] < desiredCertainty
-            print("{} {} {} with certainty {:1.2f}. {}"
-                    .format(
-                    ("Ignoring" if possiblyDead or uncertainID else "Identified"),  # What we're doing
-                    ("enemy" if i == 0 else "ally"),  # What team they're on
-                    j[0],  # What character
-                    j[1],  # How certain we are its that character (between 0 and 1, inclusive)
-                    ("Possibly dead." if j[2] > .5 else "")))  # Notes.
-        # Get the average certainty for the whole team.
-        avg_certainty = mean([j[1] for j in team])
-        avg_certainties.append(avg_certainty)
-        # Finally, convert the tuples to just the names.
-        team = [j[0] for j in team if j[2] < .5]
-        allPlayers.append(team)
-    return allPlayers
+    desired_certainty = 0.95
+    team = get_portraits_from_image(opened_screenshot)
+    # Convert those portraits to tuples containing the hero name, some level of certainty, and
+    # if they're possibly dead
+    raise "team is now an dict .."
+    team = [who_is_this(img, heroImgData) for img in team]
+    for j in team:
+        possibly_dead = j[2] > .5
+        uncertain_id = j[1] < desired_certainty
+        affix = "Ignoring" if possibly_dead or uncertain_id else "Identified"
+        dead = ("Possibly dead." if j[2] > .5 else "")
+        print("{} {} {} with certainty {:1.2f}. {}".format(affix, i, j[0], j[1], dead))
+    # Get the average certainty for the whole team.
+    avg_certainty = mean([j[1] for j in team])
+    avg_certainties.append(avg_certainty)
+    # Finally, convert the tuples to just the names.
+    team = [j[0] for j in team if j[2] < .5]
+    players.append(team)
+    return players
 
 
 if __name__ == "__main__":
