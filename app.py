@@ -50,6 +50,11 @@ if USE_1080P:
 USE_1440P = True
 # This is for 2560 x 1440
 if USE_1440P:
+    # https://github.com/ponty/pyscreenshot/issues/25
+    from ctypes import windll
+    user32 = windll.user32
+    user32.SetProcessDPIAware()
+
     PORTRAIT_START_X = 530
     PORTRAIT_START_Y = 715
     PORTRAIT_H_SEPARATION = 256
@@ -321,14 +326,14 @@ def analyze_team(players, matchup_data):
 
 def hotkey_pressed(hero_data, matchup_data):
     logging.info("Hotkey pressed")
-    time.sleep(0.1)
     image = pyscreenshot.grab()
     image = np.asarray(image)
+    print(image.shape)
+    cv2.imwrite("ttest.png", image)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     players = analyze_screenshot(image, hero_data)
     logging.info(json.dumps(players, indent=2, sort_keys=True))
     analyze_team(players, matchup_data)
-    keyboard.wait()
 
 
 if __name__ == "__main__":
@@ -365,7 +370,7 @@ if __name__ == "__main__":
     matchup_data = get_matchup_data_from_csv(csv_filename)
 
     logging.info("Registering hotkey")
-    keyboard.add_hotkey('tab', hotkey_pressed, args=[hero_data, matchup_data], timeout=10)
+    keyboard.add_hotkey('tab+a', hotkey_pressed, args=[hero_data, matchup_data], timeout=1)
 
     logging.info("Press Ctrl+C to exit the program.")
 
