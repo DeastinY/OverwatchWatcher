@@ -1,10 +1,11 @@
 import argparse
+import cv2
 import sys
 import csv
 import json
 import time
 from math import fabs
-from os import scandir, stat, path, getcwd
+from os import scandir, stat, getcwd, path, mkdir
 from statistics import mean
 import requests
 from bs4 import BeautifulSoup
@@ -67,7 +68,7 @@ allHeroNames = [
     "mccree",
     "mei",
     "mercy",
-    #"orisa",
+    "orisa",
     "pharah",
     "reaper",
     "reinhardt",
@@ -97,11 +98,40 @@ def get_hero_portraits():
     """Uses spriters-resource to download the current hero portraits."""
     data = requests.get("https://www.spriters-resource.com/pc_computer/overwatch").text
     soup = BeautifulSoup(data, "lxml")
-    for img in soup.find_all("img"):
+    if not path.exists('portraits'):
+        mkdir('portraits')
+    for img in soup.find_all('img'):
         if any([h in img.get('alt').lower()for h in allHeroNames]):
-            r = requests.get("https://www.spriters-resource.com"+img.get('src'))
-            with open(img.get('src').split('/')[-1], 'wb') as fout:
+            r = requests.get('https://www.spriters-resource.com'+img.get('src'))
+            with open(path.join('portraits', img.get('src').split('/')[-1]), 'wb') as fout:
                 fout.write(r.content)
+
+
+def generate_portrait_sifts():
+    """Creates SIFT features for all portraits and stores them."""
+    sift_data = {}
+    for heroName in allHeroNames:
+        portrait_path = path.join('portraits', heroName + '.png')
+        portrait = cv2.imread(portrait_path)
+        # TODO: Could be serialized via pickle. Currently takes ~ 0.8 sec, so maybe not needed
+        sift_data[heroName] = (create_sift_data(portrait))
+    return sift_data
+
+
+def create_sift_data(image):
+    """
+    Creates SIFT features for a passed image
+    :param image: The image to process.
+    :return: The SIFT features.
+    """
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    sift = cv2.xfeatures2d.SIFT_create()
+    kp = sift.detect(gray, None)
+
+    #img = cv2.drawKeypoints(gray, kp, image)
+    #cv2.imshow("create_sift_data", img)
+    #cv2.waitKey()
+    return kp
 
 
 def get_crop_frame():
@@ -344,13 +374,13 @@ if __name__ == "__main__":
     argp = argparse.ArgumentParser()
     argp.add_argument("-b", "--buildExamples",
                       dest="buildExamples",
-                      help="Don\'t actually run the monitor, just build a list of examples from the heroes folder.",
+                      help="Build features from the portraits folder.",
                       nargs="?",
                       const=True,
                       required=False)
     argp.add_argument("-g", "--getOnlinePortraits",
-                      dest="getHeroPortraits",
-                      help="Don\'t actually run the monitor, just load current portraits from the web.",
+                      dest="getOnlinePortraits",
+                      help="Load current portraits from the web. Clean and name them afterwards yourself !",
                       nargs="?",
                       const=True,
                       required=False)
@@ -376,9 +406,8 @@ if __name__ == "__main__":
     heroFile = ""
     heroData = None
     print("Working in " + getcwd())
-    try:
-        heroFile = open(herodataFilename, "r").read()
-    except FileNotFoundError as e:
+    # TODO: Fix this
+    if not path.exists(herodataFilename):
         print("No hero data for image recognition found. Creating.")
         print("Please choose the directory that your screenshots are kept in.")
         directoryName = ""
@@ -388,17 +417,13 @@ if __name__ == "__main__":
 
         save_configuration(herodataFilename, args.useSmallerPic, directoryName)
         heroFile = open(herodataFilename, "r").read()
-    heroData = json.loads(heroFile)
 
     if args.buildExamples:
-        print("Please choose the directory that your screenshots are kept in.")
-        directoryName = ""
-        Tk().withdraw()
-        directoryName = askdirectory()
-        save_configuration(herodataFilename, args.useSmallerPic, directoryName)
+        print("Building SIFT features for portraits")
+        generate_portrait_sifts()
         exit(0)
 
-    if args.getHeroPortraits:
+    if args.getOnlinePortraits:
         print("Crawling Portraits")
         get_hero_portraits()
         exit(0)
