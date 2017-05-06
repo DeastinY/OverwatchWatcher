@@ -182,7 +182,7 @@ def who_is_this(image, hero_data, top_matches=20, debug=False):
 
     hero_possibilities = sorted(hero_possibilities, key=lambda a: a[1])
 
-    return hero_possibilities[0][0]
+    return hero_possibilities[0]
 
 
 def get_mr_screenshot(directory):
@@ -288,7 +288,7 @@ def analyze_team(players, matchup_data):
         # favorability is a rough indicator of approximately how hard the character counters the enemy team.
         favorability = 0
         # Grab the individual favorabilities for the character across the whole enemy team...
-        matchups = [matchup_data[name]["vs"][enemy] for enemy in players["enemy"]]
+        matchups = [matchup_data[name]["vs"][enemy[0]] for enemy in players["enemy"]]
         # and sum them.
         favorability = sum(matchups)
         # Sum them and shove them into a list for sorting later
