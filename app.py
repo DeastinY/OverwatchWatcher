@@ -1,3 +1,5 @@
+import pyscreenshot
+import keyboard
 import logging
 import argparse
 import configparser
@@ -5,20 +7,16 @@ import csv
 import json
 import sys
 import time
-from math import fabs
 from os import scandir, stat, getcwd, path, mkdir
-from statistics import mean
 from tkinter import Tk
 from tkinter.filedialog import askdirectory
-
 import cv2
 import numpy as np
 import pyperclip
 import requests
-from PIL import Image
 from bs4 import BeautifulSoup
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 MAX_TEAM_SIZE = 6
 
@@ -233,20 +231,22 @@ def get_matchup_data_from_csv(csv_filename):
     return matchup_dict
 
 
-def analyze_screeshot(screenshot, hero_data):
-    """
-    Analyzes a screeshot to find the probabilites for characters on each team.
-    :return: Returns information about all Players and their probabilities.
-    """
+def load_screenshot(screenshot):
     try:
-        opened_screenshot = cv2.imread(screenshot, 0)
+        return cv2.imread(screenshot, 0)
     except IOError:
         logging.error(sys.exc_info()[0])
         logging.error("Sometimes a race condition happens between Overwatch writing a screenshot and "
                       "the program reading the screenshot and it results in an error of some sort. It's a known issue.")
-        return
 
-    portraits = get_portraits_from_image(opened_screenshot)
+
+
+def analyze_screenshot(screenshot, hero_data):
+    """
+    Analyzes a screeshot to find the probabilites for characters on each team.
+    :return: Returns information about all Players and their probabilities.
+    """
+    portraits = get_portraits_from_image(screenshot)
     # Convert those portraits to tuples containing the hero name, some level of certainty, and
     # if they're possibly dead
     players = {
@@ -283,6 +283,7 @@ def analyze_team(players, matchup_data):
     filteredMatchupLists = {}
 
     favorabilityRankings = []
+    teamheroes = " ".join([p[0] for p in players["ally"]])
     # Iterate all characters we have matchup data for.
     for name in matchup_data.keys():
         # favorability is a rough indicator of approximately how hard the character counters the enemy team.
@@ -300,7 +301,7 @@ def analyze_team(players, matchup_data):
     # TODO: Turn everything above into a function that returns favorabilityRankings.
 
     # Create a list just containing the names of the most favorable heroes.
-    ret = [i["name"] for i in favorabilityRankings]
+    ret = [i["name"] for i in favorabilityRankings if not i["name"] in teamheroes]
 
     # Merge name and favorability into one entry for each entry in favorabilityRankings...
     favorabilityRankings = ["{}: {}".format(i["name"], i["favorability"]) for i in favorabilityRankings]
@@ -311,11 +312,24 @@ def analyze_team(players, matchup_data):
     text = ", ".join([shorten_name(i) for i in ret])
 
     # Indicate that we're finished by sounding an alarm, specifically, printing the ASCII Bell character, '\a'
-    logging.info("\aFinished in " + str(time.time() - tStart) + " seconds")
+    logging.info("Finished in " + str(time.time() - tStart) + " seconds")
     logging.info("Suggestions: " + text)
 
     # Copy results to clipboard so you can paste them into in-game chat
     pyperclip.copy(str(text))
+
+
+def hotkey_pressed(hero_data, matchup_data):
+    logging.info("Hotkey pressed")
+    time.sleep(0.1)
+    image = pyscreenshot.grab()
+    image = np.asarray(image)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    players = analyze_screenshot(image, hero_data)
+    logging.info(json.dumps(players, indent=2, sort_keys=True))
+    analyze_team(players, matchup_data)
+    keyboard.wait()
+
 
 if __name__ == "__main__":
     argp = argparse.ArgumentParser()
@@ -350,6 +364,9 @@ if __name__ == "__main__":
     csv_filename = "counterpickdata.csv"
     matchup_data = get_matchup_data_from_csv(csv_filename)
 
+    logging.info("Registering hotkey")
+    keyboard.add_hotkey('tab', hotkey_pressed, args=[hero_data, matchup_data], timeout=10)
+
     logging.info("Press Ctrl+C to exit the program.")
 
     logging.info("Monitoring {} for screenshots".format(screenshot_directory))
@@ -363,7 +380,7 @@ if __name__ == "__main__":
             # Set the last analyzed screenshot here
             last_analyzed_screenshot = mostrecentscreenshot
             logging.info("New screenshot \"{}\" detected at time {:1.2f}".format(mostrecentscreenshot, tStart))
-            players = analyze_screeshot(last_analyzed_screenshot, hero_data)
+            players = analyze_screenshot(load_screenshot(last_analyzed_screenshot), hero_data)
             logging.info(json.dumps(players, indent=2, sort_keys=True))
             analyze_team(players, matchup_data)
 
