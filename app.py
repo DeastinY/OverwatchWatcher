@@ -1,20 +1,24 @@
+import logging
 import argparse
-import cv2
-import sys
+import configparser
 import csv
 import json
+import sys
 import time
 from math import fabs
 from os import scandir, stat, getcwd, path, mkdir
 from statistics import mean
-import requests
-from bs4 import BeautifulSoup
 from tkinter import Tk
 from tkinter.filedialog import askdirectory
 
+import cv2
 import numpy as np
 import pyperclip
+import requests
 from PIL import Image
+from bs4 import BeautifulSoup
+
+logging.basicConfig(level=logging.DEBUG)
 
 MAX_TEAM_SIZE = 6
 
@@ -57,7 +61,7 @@ if USE_1440P:
 
 args = {}
 
-allHeroNames = [
+ALL_HERO_NAMES = [
     "ana",
     "bastion",
     "dva",
@@ -101,7 +105,7 @@ def get_hero_portraits():
     if not path.exists('portraits'):
         mkdir('portraits')
     for img in soup.find_all('img'):
-        if any([h in img.get('alt').lower()for h in allHeroNames]):
+        if any([h in img.get('alt').lower() for h in ALL_HERO_NAMES]):
             r = requests.get('https://www.spriters-resource.com'+img.get('src'))
             with open(path.join('portraits', img.get('src').split('/')[-1]), 'wb') as fout:
                 fout.write(r.content)
@@ -110,12 +114,14 @@ def get_hero_portraits():
 def generate_portrait_sifts():
     """Creates SIFT features for all portraits and stores them."""
     sift_data = {}
-    for heroName in allHeroNames:
-        portrait_path = path.join('portraits', heroName + '.png')
-        portrait = cv2.imread(portrait_path)
+    for hero_name in ALL_HERO_NAMES:
+        portrait_path = path.join('portraits', hero_name + '.png')
+        portrait = cv2.imread(portrait_path, 0)
         # TODO: Could be serialized via pickle. Currently takes ~ 0.8 sec, so maybe not needed
-        sift_data[heroName] = (create_sift_data(portrait))
+        sift_data[hero_name] = (create_sift_data(portrait), portrait)
     return sift_data
+
+surf = None
 
 
 def create_sift_data(image):
@@ -124,163 +130,59 @@ def create_sift_data(image):
     :param image: The image to process.
     :return: The SIFT features.
     """
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    sift = cv2.xfeatures2d.SIFT_create()
-    kp = sift.detect(gray, None)
-
-    #img = cv2.drawKeypoints(gray, kp, image)
-    #cv2.imshow("create_sift_data", img)
-    #cv2.waitKey()
-    return kp
-
-
-def get_crop_frame():
-    """
-    We will be doing a lot of cropping on screenshots. We're focused on hero portraits, (which are luckily all the same
-    size and evenly aligned), so we need a way to pragmatically cut images.
-    This function will return a tuple that can be used for PIL's cropping function, and offsets can be calculated as
-    needed.
-    """
-    left = PORTRAIT_START_X
-    top = PORTRAIT_START_Y
-    right = left + PORTRAIT_SIZE_X
-    bottom = top + PORTRAIT_SIZE_Y
-
-    return left, top, right, bottom
+    global surf
+    if not surf:
+        surf = cv2.xfeatures2d.SURF_create()
+    return surf.detectAndCompute(image, None)
 
 
 def get_portraits_from_image(image):
     """
     Converts a screenshot into a list of pixel data.
     :param image: The screenshot that was taken
-    :param use_smaller_pic: Set to true to use smaller pictures for faster performance at the cost of accuracy.
-    :return: A list of 6 lists of lists of lists, one for each hero observed on the team.
+    :return: 
     """
     portraits = {}
     # Get the frame we will use to crop the last_analyzed_screenshot
-    base_crop_frame = get_crop_frame()
     for vertical_separation_multiplier in [0, 1]:
         hero_portraits = []
         for j in range(0, 6):
             # Create a new frame offset from the base frame for our crop location
-            crop_frame = (
-                base_crop_frame[0] + (PORTRAIT_H_SEPARATION * j),
-                base_crop_frame[1] + (PORTRAIT_V_SEPARATION * vertical_separation_multiplier),
-                base_crop_frame[2] + (PORTRAIT_H_SEPARATION * j),
-                base_crop_frame[3] + (PORTRAIT_V_SEPARATION * vertical_separation_multiplier)
-            )
-            cropped_portrait = image.crop(crop_frame)
-            # croppedPortrait.save(str(i) + str(j) + ".png")
-            iar = np.array(cropped_portrait)
-            # Image.fromarray(iar).show()
-            hero_portraits.append(iar.tolist())
+            x = PORTRAIT_START_X + PORTRAIT_H_SEPARATION * j
+            y = PORTRAIT_START_Y + PORTRAIT_V_SEPARATION * vertical_separation_multiplier
+            w = PORTRAIT_SIZE_X
+            h = PORTRAIT_SIZE_Y
+            hero_portraits.append(image[y:y+h, x:x+w, ...])  # It is (y, x, rgb) in numpy
+            cv2.waitKey()
         team = "enemy" if vertical_separation_multiplier else "ally"
         portraits[team] = hero_portraits
-
     return portraits
 
 
-def generate_example_hero_image_data():
+def who_is_this(image, hero_data, top_matches=20, debug=False):
     """
-    Open the images in heroes/ and stores the pixel data. Create screenshots with the heroe in all slots for this.
-    :return: Returns a dictionary containing the data.
-    """
-    hero_iarls = {}
-    # Iterate through the list of hero names at the top of the file.
-    for heroName in allHeroNames:
-        # Get the name of screenshot that HOPEFULLY contains their portrait in the player's slot.
-        example_data_path = path.join("heroes", heroName) + ".jpg"
-        example_screenshot = Image.open(example_data_path)
-
-        # Get the portraits
-        cropped_portraits = get_portraits_from_image(example_screenshot)
-        iar = []
-        for key, value in cropped_portraits.items():
-            for v in value:
-                iar.append(np.array(v).tolist())
-        hero_iarls[heroName] = iar
-    return hero_iarls
-
-
-def save_configuration(hero_data_filename, b_use_smaller_pic, screenshot_dir):
-    """
-    Saves configuration data for the next time the script runs.
-    :param hero_data_filename: The filename to which the data will be saved.
-    :param screenshot_dir: The directory in which Overwatch keeps its Screenshots
-    :return: A dictionary containing at least the heroImageData and screenshotDirectory at the moment.
-    """
-    """
-    This function makes the assumption that you have a directory named "heroes" that contains a bunch of .jpg
-    screenshots of you showing the score screen (Typically TAB), playing a hero that shares the same name as the
-    screenshot. That is, if heroes/tracer.jpg does not exist, or you didn't have Tracer selected in that pic, you're
-    going to have issues. Assuming the assumptions are met, this function will store arrays of image data of each hero's
-    portrait in a JSON structure, then store that JSON in herodata.txt.
-    """
-    hero_examples = open(hero_data_filename, "w+")
-    hero_iarls = generate_example_hero_image_data()
-
-    save_data = {"heroImgData": hero_iarls,
-                 "screenshotDirectory": screenshot_dir
-                 }
-    # Convert the dict into a JSON structure and write it to file.
-    hero_examples.write(json.dumps(save_data))
-    print("Saved heroes to " + hero_data_filename)
-
-
-def mean_array_diff(list_a, list_b):
-    """
-    This kind of perform's photoshop's "difference" blending mode between two pixels, list_a and list_b. Basically,
-    the new pixel's RGB is determined by [fabs(a[0] - b[0]), fabs(a[1] - b[1]), fabs(a[2] - b[2])]. Then the RGB
-    channels of that new pixel are all averaged together to produce a number between 0 and 255 (inclusive) that
-    indicates how much difference there is between the two pixels.
-    :param list_a: A list of three integers between 0 and 255, inclusive. No check is done on size.
-    :param list_b: A list of three integers between 0 and 255, inclusive. No check is done on size.
-    :return:
-    """
-    diff = [fabs(list_a[i] - list_b[i]) for i in range(0, len(list_a))]
-    return mean(diff)
-
-
-def who_is_this(iarl, json_hero_data):
-    """
-    Takes an educated guess at which hero is described in the image data contained by iarl.
-    FYI, this is fairly slow because it checks every pixel in every image supplied.
-    :param iarl: The image data (list of list of pixels (list) to analyze
-    :param json_hero_data: The stored data to compare it to.
+    Takes an educated guess at which hero is described in the image.
+    Uses SIFT Features
     :return: Returns a string containing the name of the hero possibly shown in the picture.
     """
-    unknown_hero_iarl = iarl
     hero_possibilities = []
-    height = len(unknown_hero_iarl)
-    width = len(unknown_hero_iarl[0])
-    area = height * width
-    for heroName in allHeroNames:
-        possible_hero_iarl = json_hero_data[heroName]
-        sum_mean_diff = 0
-        redness = 0
-        for i in range(0, len(possible_hero_iarl)):
-            row_possible = possible_hero_iarl[i]
-            row_unknown = unknown_hero_iarl[i]
-            for j in range(0, len(row_possible)):
-                pixel_possible = row_possible[j]
-                pixel_unknown = row_unknown[j]
-                if pixel_unknown[0] > (pixel_unknown[1] + pixel_unknown[2]) * 2:
-                    redness += 1
-                sum_mean_diff += mean_array_diff(pixel_possible, pixel_unknown)
-        sum_mean_diff /= area
-        redness /= area
-        entry = [heroName, sum_mean_diff, redness]
-        hero_possibilities.append(entry)
+    kp, des = create_sift_data(image)
+    bf = cv2.BFMatcher(cv2.NORM_L1, crossCheck=False)
+    for hero_name, data in hero_data.items():
+        kpdes, img = data
+        matches = bf.match(des, kpdes[1])
+        matches = sorted(matches, key=lambda x: x.distance)
+        avg_dist = np.mean([m.distance for m in matches[:top_matches]])
+        if debug:
+            i = None
+            i = cv2.drawMatches(image, kp, img, kpdes[0], matches[:top_matches], i, flags=2)
+            cv2.imshow("Matches", i)
+            cv2.waitKey()
+        hero_possibilities.append((hero_name, avg_dist))
 
-    # Sort possible heroes by amount of difference between the pictures, lowest difference being first.
     hero_possibilities = sorted(hero_possibilities, key=lambda a: a[1])
-    # Uncomment this line to print the 6 most likely heroes for the given iarl.
-    # print([i[0] for i in hero_possibilities][:6])
-    best_guess = hero_possibilities[0]
 
-    # Normalize the best guess for ease of readability and further calculation
-    best_guess[1] = 1 - (best_guess[1] / 255)
-    return best_guess
+    return hero_possibilities[0][0]
 
 
 def get_mr_screenshot(directory):
@@ -306,7 +208,7 @@ def shorten_name(name):
     return shortHeroNames[name] if name in shortHeroNames.keys() else name
 
 
-def get_matchup_data_from_csv(csv_filename, b_print=False):
+def get_matchup_data_from_csv(csv_filename):
     """
     Typically you store matchup data in a table, with the same list of characters on both axes and every cell contains
     some number describing how favorable it is for the character on the y-axis.
@@ -325,71 +227,103 @@ def get_matchup_data_from_csv(csv_filename, b_print=False):
                         matchups[key] = float(row[key])
 
                 matchup_dict[row["name"]] = {"vs": matchups}
-                # Uncomment this to print the counterpickdata as JSON instead of CSV.
-                if b_print:
-                    print(json.dumps(matchup_dict, indent=4, sort_keys=True))
     except FileNotFoundError:
         print("Somehow, someway, you're missing {}. You may want to redownload this thing".format(csv_filename))
         exit(1)
     return matchup_dict
 
 
-def analyze_screeshot(screenshot, useSmallerPic):
+def analyze_screeshot(screenshot, hero_data):
     """
     Analyzes a screeshot to find the probabilites for characters on each team.
     :return: Returns information about all Players and their probabilities.
     """
     try:
-        opened_screenshot = Image.open(screenshot)
-    except:
-        print(sys.exc_info()[0])
-        print("Sometimes a race condition happens between Overwatch writing a screenshot and the program reading the screenshot and it results in an error of some sort. It's a known issue.")
+        opened_screenshot = cv2.imread(screenshot, 0)
+    except IOError:
+        logging.error(sys.exc_info()[0])
+        logging.error("Sometimes a race condition happens between Overwatch writing a screenshot and "
+                      "the program reading the screenshot and it results in an error of some sort. It's a known issue.")
         return
 
-    players = []
-    avg_certainties = []
-    # TODO: Combine desired certainty with margin on portraits somehow. They kind of influence each other.
-    desired_certainty = 0.95
-    team = get_portraits_from_image(opened_screenshot)
+    portraits = get_portraits_from_image(opened_screenshot)
     # Convert those portraits to tuples containing the hero name, some level of certainty, and
     # if they're possibly dead
-    raise "team is now an dict .."
-    team = [who_is_this(img, heroImgData) for img in team]
-    for j in team:
-        possibly_dead = j[2] > .5
-        uncertain_id = j[1] < desired_certainty
-        affix = "Ignoring" if possibly_dead or uncertain_id else "Identified"
-        dead = ("Possibly dead." if j[2] > .5 else "")
-        print("{} {} {} with certainty {:1.2f}. {}".format(affix, i, j[0], j[1], dead))
-    # Get the average certainty for the whole team.
-    avg_certainty = mean([j[1] for j in team])
-    avg_certainties.append(avg_certainty)
-    # Finally, convert the tuples to just the names.
-    team = [j[0] for j in team if j[2] < .5]
-    players.append(team)
+    players = {
+        "ally": [],
+        "enemy": []
+    }
+    for i in ["ally", "enemy"]:
+        for portrait in portraits[i]:
+            players[i].append(who_is_this(portrait, hero_data))
     return players
 
 
+def get_config():
+    """
+    :return: A ConfigParser object containing our config. 
+    """
+    config_file = "config.ini"
+    config = configparser.ConfigParser()
+
+    if not path.exists(config_file):
+        print("Please choose the directory that your screenshots are kept in.")
+        # Kind of hackish way of prompting the user for a directory to monitor, BUT IT WORKS
+        Tk().withdraw()
+        config['DEFAULT'] = {'ScreenshotDirectory': askdirectory()}
+        with open(config_file, 'w') as fout:
+            config.write(fout)
+    else:
+        config.read(config_file)
+    return config
+
+
+def analyze_team(players, matchup_data):
+    """Analyzes the given team."""
+    filteredMatchupLists = {}
+
+    favorabilityRankings = []
+    # Iterate all characters we have matchup data for.
+    for name in matchup_data.keys():
+        # favorability is a rough indicator of approximately how hard the character counters the enemy team.
+        favorability = 0
+        # Grab the individual favorabilities for the character across the whole enemy team...
+        matchups = [matchup_data[name]["vs"][enemy] for enemy in players["enemy"]]
+        # and sum them.
+        favorability = sum(matchups)
+        # Sum them and shove them into a list for sorting later
+        favorabilityRankings.append({"name": name, "favorability": sum(matchups)})
+
+    # If this was SQL, this would be "ORDER BY favorability LIMIT MAX_TEAM_SIZE" or something
+    favorabilityRankings = sorted(favorabilityRankings, key=lambda a: a["favorability"], reverse=True)
+    favorabilityRankings = favorabilityRankings[:MAX_TEAM_SIZE]
+    # TODO: Turn everything above into a function that returns favorabilityRankings.
+
+    # Create a list just containing the names of the most favorable heroes.
+    ret = [i["name"] for i in favorabilityRankings]
+
+    # Merge name and favorability into one entry for each entry in favorabilityRankings...
+    favorabilityRankings = ["{}: {}".format(i["name"], i["favorability"]) for i in favorabilityRankings]
+    # ...so we can neatly print the details.
+    logging.info("Top {}:\n{}".format(MAX_TEAM_SIZE, json.dumps(favorabilityRankings, indent=4, sort_keys=True)))
+
+    # Summarize the results into a format that can be easily copied to a clipboard.
+    text = ", ".join([shorten_name(i) for i in ret])
+
+    # Indicate that we're finished by sounding an alarm, specifically, printing the ASCII Bell character, '\a'
+    logging.info("\aFinished in " + str(time.time() - tStart) + " seconds")
+    logging.info("Suggestions: " + text)
+
+    # Copy results to clipboard so you can paste them into in-game chat
+    pyperclip.copy(str(text))
+
 if __name__ == "__main__":
     argp = argparse.ArgumentParser()
-    argp.add_argument("-b", "--buildExamples",
-                      dest="buildExamples",
-                      help="Build features from the portraits folder.",
-                      nargs="?",
-                      const=True,
-                      required=False)
     argp.add_argument("-g", "--getOnlinePortraits",
                       dest="getOnlinePortraits",
                       help="Load current portraits from the web. Clean and name them afterwards yourself !",
                       nargs="?",
                       const=True,
-                      required=False)
-    argp.add_argument("-n", "--no-monitor",
-                      dest="noMonitor",
-                      help="Don't monitor the directory, just run once and quit",
-                      nargs="?",
-                      const=True,
-                      default=False,
                       required=False)
     argp.add_argument("-r", "--resolution",
                       dest="resolution",
@@ -399,100 +333,39 @@ if __name__ == "__main__":
                       required=False)
 
     args = argp.parse_args()
-    print(str(args))
-
-    # TODO: Have a command-line option to regenerate herodata.json from csv.
-    herodataFilename = "herodata.json"
-    heroFile = ""
-    heroData = None
-    print("Working in " + getcwd())
-    # TODO: Fix this
-    if not path.exists(herodataFilename):
-        print("No hero data for image recognition found. Creating.")
-        print("Please choose the directory that your screenshots are kept in.")
-        directoryName = ""
-        # Kind of hackish way of prompting the user for a directory to monitor, BUT IT WORKS
-        Tk().withdraw()
-        directoryName = askdirectory()
-
-        save_configuration(herodataFilename, args.useSmallerPic, directoryName)
-        heroFile = open(herodataFilename, "r").read()
-
-    if args.buildExamples:
-        print("Building SIFT features for portraits")
-        generate_portrait_sifts()
-        exit(0)
+    config = get_config()
+    screenshot_directory = config['DEFAULT']['ScreenshotDirectory']
+    logging.info(str(args))
+    logging.debug("Working in " + getcwd())
 
     if args.getOnlinePortraits:
-        print("Crawling Portraits")
+        logging.info("Crawling Portraits")
         get_hero_portraits()
         exit(0)
+
+    logging.info("Building SIFT features for portraits")
+    hero_data = generate_portrait_sifts()
+
+    logging.info("Loading counterpickdata.csv")
     csv_filename = "counterpickdata.csv"
-    matchupDict = get_matchup_data_from_csv(csv_filename)
+    matchup_data = get_matchup_data_from_csv(csv_filename)
 
-    print("Press Ctrl+C to exit the program.")
+    logging.info("Press Ctrl+C to exit the program.")
 
-    heroImgData = heroData["heroImgData"]
-    directoryName = heroData["screenshotDirectory"]
-    print("Monitoring " + directoryName + " for screenshots")
+    logging.info("Monitoring {} for screenshots".format(screenshot_directory))
 
     last_analyzed_screenshot = ""
     while True:
-        # get the current time. We'll need to see how much time elapsed while we were working to calculate the time we
-        # sleep for.
         tStart = time.time()
-        mostrecentscreenshot = get_mr_screenshot(directoryName)
+        mostrecentscreenshot = get_mr_screenshot(screenshot_directory)
         analysisInProgress = False
         if last_analyzed_screenshot != mostrecentscreenshot:
             # Set the last analyzed screenshot here
             last_analyzed_screenshot = mostrecentscreenshot
-            print("New screenshot \"{}\" detected at time {:1.2f}".format(mostrecentscreenshot, tStart))
-            allPlayers = analyze_screeshot(last_analyzed_screenshot, args.useSmallerPic)
-            
-
-            print(json.dumps(allPlayers, indent=4, sort_keys=True))
-            # TODO: Turn everything below into a function that accepts enemies and allies as parameters.
-            compToBeat = allPlayers[0]
-            filteredMatchupLists = {}
-
-            favorabilityRankings = []
-            # Iterate all characters we have matchup data for.
-            for name in matchupDict.keys():
-                # favorability is a rough indicator of approximately how hard the character counters the enemy team.
-                favorability = 0
-                # Grab the individual favorabilities for the character across the whole enemy team...
-                matchups = [matchupDict[name]["vs"][enemy] for enemy in allPlayers[0]]
-                # and sum them.
-                favorability = sum(matchups)
-                # Sum them and shove them into a list for sorting later
-                favorabilityRankings.append({"name": name, "favorability": sum(matchups)})
-
-            # If this was SQL, this would be "ORDER BY favorability LIMIT MAX_TEAM_SIZE" or something
-            favorabilityRankings = sorted(favorabilityRankings, key=lambda a: a["favorability"], reverse=True)
-            favorabilityRankings = favorabilityRankings[:MAX_TEAM_SIZE]
-            # TODO: Turn everything above into a function that returns favorabilityRankings.
-
-            # Create a list just containing the names of the most favorable heroes.
-            ret = [i["name"] for i in favorabilityRankings]
-
-            # Merge name and favorability into one entry for each entry in favorabilityRankings...
-            favorabilityRankings = ["{}: {}".format(i["name"], i["favorability"]) for i in favorabilityRankings]
-            # ...so we can neatly print the details.
-            print("Top {}:\n{}".format(MAX_TEAM_SIZE, json.dumps(favorabilityRankings, indent=4, sort_keys=True)))
-
-            # Summarize the results into a format that can be easily copied to a clipboard.
-            text = ", ".join([shorten_name(i) for i in ret])
-
-            # Indicate that we're finished by sounding an alarm, specifically, printing the ASCII Bell character, '\a'
-            print("\aFinished in " + str(time.time() - tStart) + " seconds")
-            print("Suggestions: " + text)
-
-            # Copy results to clipboard so you can paste them into in-game chat
-            pyperclip.copy(str(text))
+            logging.info("New screenshot \"{}\" detected at time {:1.2f}".format(mostrecentscreenshot, tStart))
+            players = analyze_screeshot(last_analyzed_screenshot, hero_data)
+            logging.info(json.dumps(players, indent=2, sort_keys=True))
+            analyze_team(players, matchup_data)
 
         sleepDuration = time.time() - tStart
-        if args.noMonitor:
-            # Sleep for a second or two so we can actually hear the alarm before terminating.
-            time.sleep(2)
-            exit(0)
         time.sleep(1 - (sleepDuration if sleepDuration < 1 else 0))
