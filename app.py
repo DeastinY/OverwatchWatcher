@@ -58,7 +58,7 @@ if USE_1440P:
     PORTRAIT_START_X = 530
     PORTRAIT_START_Y = 715
     PORTRAIT_H_SEPARATION = 256
-    PORTRAIT_V_SEPARATION = -410
+    PORTRAIT_V_SEPARATION = -350
     PORTRAIT_SIZE_X = 220
     PORTRAIT_SIZE_Y = 220
 
@@ -119,12 +119,12 @@ def generate_portrait_sifts():
     sift_data = {}
     for hero_name in ALL_HERO_NAMES:
         portrait_path = path.join('portraits', hero_name + '.png')
-        portrait = cv2.imread(portrait_path, 0)
+        portrait = cv2.imread(portrait_path)
         # TODO: Could be serialized via pickle. Currently takes ~ 0.8 sec, so maybe not needed
         sift_data[hero_name] = (create_sift_data(portrait), portrait)
     return sift_data
 
-surf = None
+sift = None
 
 
 def create_sift_data(image):
@@ -133,10 +133,17 @@ def create_sift_data(image):
     :param image: The image to process.
     :return: The SIFT features.
     """
-    global surf
-    if not surf:
-        surf = cv2.xfeatures2d.SURF_create()
-    return surf.detectAndCompute(image, None)
+    global sift
+    if not sift:
+        sift = cv2.xfeatures2d.SIFT_create()
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    equ = cv2.equalizeHist(gray)
+    # create a CLAHE object (Arguments are optional).
+    clahe = cv2.createCLAHE()
+    equ = clahe.apply(gray)
+    cv2.imshow("test", equ)
+    cv2.waitKey()
+    return sift.detectAndCompute(equ, None)
 
 
 def get_portraits_from_image(image):
@@ -238,7 +245,7 @@ def get_matchup_data_from_csv(csv_filename):
 
 def load_screenshot(screenshot):
     try:
-        return cv2.imread(screenshot, 0)
+        return cv2.imread(screenshot)
     except IOError:
         logging.error(sys.exc_info()[0])
         logging.error("Sometimes a race condition happens between Overwatch writing a screenshot and "
@@ -289,12 +296,18 @@ def analyze_team(players, matchup_data):
 
     favorabilityRankings = []
     teamheroes = " ".join([p[0] for p in players["ally"]])
+    enemies = []
+    for e in players["enemy"]:
+        if e[1] > 1.0:  # TODO: test / make this proper
+            logging.warning("Ignoring {} with probability {:.2f}".format(e[0], e[1]))
+        else:
+            enemies.append(e)
     # Iterate all characters we have matchup data for.
-    for name in matchup_data.keys():
+    for name, probability in matchup_data.items():
         # favorability is a rough indicator of approximately how hard the character counters the enemy team.
         favorability = 0
         # Grab the individual favorabilities for the character across the whole enemy team...
-        matchups = [matchup_data[name]["vs"][enemy[0]] for enemy in players["enemy"]]
+        matchups = [matchup_data[name]["vs"][enemy[0]] for enemy in enemies]
         # and sum them.
         favorability = sum(matchups)
         # Sum them and shove them into a list for sorting later
@@ -306,7 +319,13 @@ def analyze_team(players, matchup_data):
     # TODO: Turn everything above into a function that returns favorabilityRankings.
 
     # Create a list just containing the names of the most favorable heroes.
-    ret = [i["name"] for i in favorabilityRankings if not i["name"] in teamheroes]
+    ret = []
+    for i in favorabilityRankings:
+        if i["name"] in teamheroes:
+            formstr = "({} {:.1f})"
+        else:
+            formstr = "{} {:.1f}"
+        ret.append(formstr.format(i["name"], i["favorability"]))
 
     # Merge name and favorability into one entry for each entry in favorabilityRankings...
     favorabilityRankings = ["{}: {}".format(i["name"], i["favorability"]) for i in favorabilityRankings]
