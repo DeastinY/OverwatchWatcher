@@ -335,7 +335,7 @@ def analyze_team(players, matchup_data):
     text = ", ".join([shorten_name(i) for i in ret])
 
     # Indicate that we're finished by sounding an alarm, specifically, printing the ASCII Bell character, '\a'
-    logging.info("Finished in " + str(time.time() - tStart) + " seconds")
+    logging.info("\aFinished in " + str(time.time() - tStart) + " seconds")
     logging.info("Suggestions: " + text)
 
     # Copy results to clipboard so you can paste them into in-game chat
