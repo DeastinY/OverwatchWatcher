@@ -141,8 +141,6 @@ def create_sift_data(image):
     # create a CLAHE object (Arguments are optional).
     clahe = cv2.createCLAHE()
     equ = clahe.apply(gray)
-    cv2.imshow("test", equ)
-    cv2.waitKey()
     return sift.detectAndCompute(equ, None)
 
 
@@ -183,6 +181,7 @@ def who_is_this(image, hero_data, top_matches=20, debug=False):
         matches = bf.match(des, kpdes[1])
         matches = sorted(matches, key=lambda x: x.distance)
         avg_dist = np.mean([m.distance for m in matches[:top_matches]])
+        avg_dist = avg_dist/1100
         if debug:
             i = None
             i = cv2.drawMatches(image, kp, img, kpdes[0], matches[:top_matches], i, flags=2)
